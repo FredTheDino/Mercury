@@ -132,11 +132,12 @@ def try_parse_expression(tokens):
     # TODO(ed): This is what's next...
     literal, tokens = try_parse_string_literal(tokens)
     if literal:
-        return (TokenType.EXPRESSION, literal), tokens
+        return (TokenType.CONSTANT, literal), tokens
     num, tokens = try_parse_numeric_constant(tokens)
     if num:
-        return (TokenType.EXPRESSION, num), tokens
-    return (TokenType.EXPRESSION, -1), []
+        return (TokenType.CONSTANT, num), tokens
+    return (TokenType.CONSTANT, -1), []
+    # return (TokenType.EXPRESSION, -1), []
 
 
 def try_parse_output(tokens):
@@ -305,22 +306,32 @@ def eval_statement(statement, variables):
     if statement[0] == TokenType.END:
         return True
     if statement[0] == TokenType.ASSIGNMENT:
-        eval_assignment(statement[1], eval_expression(statement[2], variables), variables)
+        eval_assignment(statement[1], statement[2], variables)
         return
-    if  statement[0] == TokenType.OUTPUT:
+    if statement[0] == TokenType.OUTPUT:
         print(eval_expression(statement[1], variables))
         return
     raise ValueError("Invalid statement")
 
 
+def type_is(exprs, typ):
+    return exprs[0] == typ
+
+
 def eval_expression(expression, variables):
     """ Evaluates an expression. """
-    assert(expression[0] == TokenType.EXPRESSION, "Invalid expression")
-    assert(type(expression[1]) != type((0,)), "Invalid expression")
-    return expression[1]
+    t, expr = expression
+    if t == TokenType.CONSTANT:
+        return expr
+    if t == TokenType.VARIABLE:
+        return variables[expr]
+    # assert expression[0] == TokenType.EXPRESSION, "Invalid expression"
+    assert False, "Invalid expression!"
+
 
 def eval_assignment(variable, expression, variables):
-    variables[variable] = expression
+    # ...
+    variables[variable[1]] = eval_expression(expression, variables)
 
 
 def run_program(ast):
@@ -339,5 +350,7 @@ if __name__ == "__main__":
             print("Failed to parse input file")
         else:
             print("\n".join(str(x) for x in ast))
+            print("-------------------")
             state = run_program(ast)
+            print("-------------------")
             print("state: ", state)
