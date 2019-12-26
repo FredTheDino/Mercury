@@ -35,7 +35,7 @@ class TokenType(Enum):
     OUTPUT = 5
     INPUT = 6
     END = 7
-    IF = 8
+    IF = 10
     STRING = 9
 
 def is_simple_variable(token):
@@ -134,7 +134,7 @@ def try_parse_expression(tokens):
     if literal:
         return (TokenType.CONSTANT, literal), tokens
     num, tokens = try_parse_numeric_constant(tokens)
-    if num:
+    if num is not None:
         return (TokenType.CONSTANT, num), tokens
     return (TokenType.CONSTANT, -1), []
     # return (TokenType.EXPRESSION, -1), []
@@ -283,35 +283,65 @@ def index_of_all(string, sym):
     return [i for i, c in string if c == sym]
 
 
+def treeify(statements):
+    ast = []
+    while statements:
+        first = statements[0]
+        statements = statements[1:]
+        if type_is(first, TokenType.END):
+            break
+        if type_is(first, TokenType.IF):
+            t, expr = first
+            block, statements = treeify(statements)
+            first = t, expr, block
+        ast.append(first)
+    return ast, statements
+
+
 def parse_source(source, source_file_name):
     """ Parses a source file into an AST for the Rockstar language. """
     success = True
-    ast = []
+    tokens = []
     for line_nr, line in enumerate(source.split("\n")):
         try:
             if tokenized := parse_line(line):
-                ast.append(tokenized)
+                tokens.append(tokenized)
         except RockstarSyntaxError as e:
             e.add_info(source_file_name, line_nr, line)
             # TODO(ed): Add some form of loggin? Print to stderr?
             success = False
             print(str(e))
-    if success:
-        return ast, success
-    return None, success
+    if not success:
+        return None, success
+    # Restructure the list into an actual tree..
+    left = tokens
+    ast = []
+    while left:
+        statement, left = treeify(left)
+        if statement:
+            ast += statement
+    import pprint
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(ast)
+    return ast, success
 
 
 def eval_statement(statement, variables):
     """ Evaluates a statement. """
-    if statement[0] == TokenType.END:
-        return True
-    if statement[0] == TokenType.ASSIGNMENT:
+    if type_is(statement, TokenType.ASSIGNMENT):
         eval_assignment(statement[1], statement[2], variables)
-        return
-    if statement[0] == TokenType.OUTPUT:
+    elif type_is(statement, TokenType.OUTPUT):
         print(eval_expression(statement[1], variables))
-        return
-    raise ValueError("Invalid statement")
+    elif type_is(statement, TokenType.IF):
+        # Assumes true... pretty bad if-statements.
+        res = eval_expression(statement[1], variables)
+        print("EVAL: ", statement[1], res)
+        if res:
+            print("true!")
+            eval_statements(statement[2], variables)
+    else:
+        print(statement)
+        raise ValueError("Invalid statement")
 
 
 def type_is(exprs, typ):
@@ -334,11 +364,15 @@ def eval_assignment(variable, expression, variables):
     variables[variable[1]] = eval_expression(expression, variables)
 
 
+def eval_statements(statements, variables):
+    for statement in statements:
+        eval_statement(statement, variables)
+
+
 def run_program(ast):
     """ Runs a rockstar program. """
     variables = {}
-    for statement in ast:
-        eval_statement(statement, variables)
+    eval_statements(ast, variables)
     return variables
 
 if __name__ == "__main__":
@@ -349,7 +383,7 @@ if __name__ == "__main__":
         if not success:
             print("Failed to parse input file")
         else:
-            print("\n".join(str(x) for x in ast))
+            # print("\n".join(str(x) for x in ast))
             print("-------------------")
             state = run_program(ast)
             print("-------------------")
