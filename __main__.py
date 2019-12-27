@@ -125,6 +125,13 @@ def try_parse_string_literal(tokens):
 
 def try_parse_numeric_constant(tokens):
     """ Tries to parse out a numeric constant from the tokens. """
+    #TODO(ed): Should null be 0?
+    if tokens[0] in ["null", "nothing", "nowhere", "nobody", "empty", "gone"]:
+        return 0, tokens[1:]
+    if tokens[0] in ["true", "right", "yes", "ok", "truth"]:
+        return True, tokens[1:]
+    if tokens[0] in ["false", "wrong", "no", "lies"]:
+        return False, tokens[1:]
     try:
         n = int(tokens[0])
         return (TokenType.CONSTANT, n), tokens[1:]
@@ -237,22 +244,23 @@ def parse_line(source):
         raise RockstarSyntaxError("Line doesn't start with capital letter")
 
     # TODO(ed): Can this be made neater somehow?
-    if "(" in source or ")" in source:
-        if "(" in source and ")" in source:
-            start = source.index("(")
-            end = source.index(")")
+    mod = source[:]
+    if "(" in mod or ")" in mod:
+        if "(" in mod and ")" in mod:
+            start = mod.index("(")
+            end = mod.index(")")
             if start < end:
-                source = source[:start] + source[end+1:]
+                mod = mod[:start] + mod[end+1:]
             else:
                 raise RockstarSyntaxError("Invalid comment")
         else:
             raise RockstarSyntaxError("Invalid comment")
 
-    source = source.replace("'s ", " is ")
-    source = source.replace("'", "")
+    mod = mod.replace("'s ", " is ")
+    mod = mod.replace("'", "")
 
     # TODO(ed): This can be made a lot better...
-    tokens = tokenize(source)
+    tokens = tokenize(mod)
     if not tokens: return (TokenType.END, )
     output, tokens = try_parse_output(tokens)
     if output is not None:
@@ -324,23 +332,21 @@ def parse_line(source):
     # TODO(ed): Assumes that if nothing is said, it's poetic.
     varname, tokens = try_parse_variable_name(tokens)
     if varname is not None:
-        if tokens[0] not in ["be", "is", "are", "were", "was"]:
-            raise RockstarSyntaxError("Expected 'be' in assignemnt.")
-        tokens = tokens[1:]
+        if tokens[0] in ["be", "is", "are", "were", "was"]:
+            tokens = tokens[1:]
 
-        if not tokens:
-            raise RockstarSyntaxError("Expected expression in assignment. Not end of line.")
+            exprs = parse_poetic_number_literals(tokens)
+            if exprs is None:
+                raise RockstarSyntaxError("Expected expression in assignment.")
 
-        exprs = parse_poetic_number_literals(tokens)
-        if exprs is None:
-            raise RockstarSyntaxError("Expected expression in assignment.")
-        return TokenType.ASSIGNMENT, varname, (TokenType.EXPRESSION, [exprs])
+            return TokenType.ASSIGNMENT, varname, (TokenType.EXPRESSION, [exprs])
+
+        if tokens[0] in ["says", "shouts", "screams", "wispers"]:
+            # Poetic string literals
+            literal = source.split(tokens[0])[1][1:]
+            expr = (TokenType.CONSTANT, literal)
+            return TokenType.ASSIGNMENT, varname, (TokenType.EXPRESSION, [expr])
     raise RockstarSyntaxError("Cannot parse line")
-
-
-def index_of_all(string, sym):
-    """ Returns the index of all symbols in the given string. """
-    return [i for i, c in string if c == sym]
 
 
 def treeify(statements):
@@ -431,6 +437,8 @@ def eval_evalable(evalable, variables):
 
 def eval_expression(expression, variables):
     """ Evaluates an expression. """
+    # TODO(ed): This is far from enough complexity to evaluate.
+    # There needs to be some way to do the order of operations easily for this.
     assert type_is(expression, TokenType.EXPRESSION), "Cannot eval non-expression"
     _, expr = expression
     left = eval_evalable(expr[0], variables)
