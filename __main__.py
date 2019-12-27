@@ -71,8 +71,11 @@ def try_parse_variable_name(tokens):
                 variable_name = (tokens[0] + tokens[1])
                 tokens = tokens[2:]
         elif is_proper_variable(tokens[0]):
-            proper = [x for x in tokens if is_proper_variable(x)]
-            tokens = tokens[len(proper):]
+            proper = []
+            while tokens:
+                if is_proper_variable(tokens[0]): proper.append(tokens[0])
+                else: break
+                tokens = tokens[1:]
             variable_name = "_".join(proper)
         elif is_simple_variable(tokens[0]):
             variable_name = tokens[0]
@@ -108,7 +111,7 @@ def parse_poetic_number_literals(tokens):
         decimal *= 10
         decimal += sum(map(lambda c: c.isalpha() or c == "-", t)) % 10
 
-    return num + (decimal * 10 ** -points)
+    return TokenType.CONSTANT, num + (decimal * 10 ** -points)
 
 
 def try_parse_string_literal(tokens):
@@ -136,6 +139,9 @@ def try_parse_expression(tokens):
     num, tokens = try_parse_numeric_constant(tokens)
     if num is not None:
         return (TokenType.CONSTANT, num), tokens
+    var, tokens = try_parse_variable_name(tokens)
+    if var is not None:
+        return var, tokens
     return (TokenType.CONSTANT, -1), []
     # return (TokenType.EXPRESSION, -1), []
 
@@ -252,6 +258,23 @@ def parse_line(source):
             raise RockstarSyntaxError("Unexpected tokens at end of line")
         return TokenType.ASSIGNMENT, varname, exprs
 
+    if tokens[0] == "Let":
+        tokens = tokens[1:]
+        varname, tokens = try_parse_variable_name(tokens)
+        print(varname)
+        if varname is None:
+            raise RockstarSyntaxError("Expected variable in assignment.")
+        if tokens[0] not in ["be", "is", "are", "were", "was"]:
+            raise RockstarSyntaxError("Expected \"into\" after variable in assignment.")
+
+        tokens = tokens[1:]
+        exprs, tokens = try_parse_expression(tokens)
+        if exprs is None:
+            raise RockstarSyntaxError("Expected expression in assignment.")
+        if tokens:
+            raise RockstarSyntaxError("Unexpected tokens at end of line")
+        return TokenType.ASSIGNMENT, varname, exprs
+
     if tokens[0] == "If":
         tokens = tokens[1:]
         expr, tokens = try_parse_expression(tokens)
@@ -259,7 +282,7 @@ def parse_line(source):
             raise RockstarSyntaxError("Expected expression in assignment.")
         return TokenType.IF, expr
 
-    # TODO(ed): Let syntax is confusing in the spec, what is a valid assignment?
+    # TODO(ed): Assumes that if nothing is said, it's poetic.
     varname, tokens = try_parse_variable_name(tokens)
     if varname is not None:
         if tokens[0] not in ["be", "is", "are", "were", "was"]:
@@ -269,11 +292,9 @@ def parse_line(source):
         if not tokens:
             raise RockstarSyntaxError("Expected expression in assignment. Not end of line.")
 
-        exprs, tokens = try_parse_expression(tokens)
+        exprs = parse_poetic_number_literals(tokens)
         if exprs is None:
             raise RockstarSyntaxError("Expected expression in assignment.")
-        if tokens:
-            raise RockstarSyntaxError("Unexpected tokens at end of line")
         return TokenType.ASSIGNMENT, varname, exprs
     raise RockstarSyntaxError("Cannot parse line")
 
