@@ -36,6 +36,8 @@ class TokenType(Enum):
     INPUT = 6
     END = 7
     IF = 10
+    OPERATOR = 11
+    TURN = 12
     STRING = 9
 
 def is_simple_variable(token):
@@ -68,7 +70,7 @@ def try_parse_variable_name(tokens):
             tokens = tokens[1:]
         elif tokens[0] in valid_prefixes:
             if len(tokens) > 1 and is_simple_variable(tokens[1]):
-                variable_name = (tokens[0] + tokens[1])
+                variable_name = (tokens[0] + "#" + tokens[1])
                 tokens = tokens[2:]
         elif is_proper_variable(tokens[0]):
             proper = []
@@ -117,7 +119,7 @@ def parse_poetic_number_literals(tokens):
 def try_parse_string_literal(tokens):
     """ Tries to parse out a string literal from the tokens. """
     if tokens and tokens[0].startswith("\"") and tokens[0].startswith("\""):
-        return tokens[0], tokens[1:]
+        return (TokenType.CONSTANT, tokens[0]), tokens[1:]
     return None, tokens
 
 
@@ -125,25 +127,46 @@ def try_parse_numeric_constant(tokens):
     """ Tries to parse out a numeric constant from the tokens. """
     try:
         n = int(tokens[0])
-        return n, tokens[1:]
+        return (TokenType.CONSTANT, n), tokens[1:]
     except ValueError:
         return None, tokens
 
 
+def try_parse_operator(tokens):
+    token = tokens[0]
+    if token in ["plus", "with"]:
+        return (TokenType.OPERATOR, "add"), tokens[1:]
+    if token in ["minus", "without"]:
+        return (TokenType.OPERATOR, "sub"), tokens[1:]
+    if token in ["times", "of"]:
+        return (tokentype.OPERATOR, "mul"), tokens[1:]
+    if token in ["over"]:
+        return (tokentype.OPERATOR, "div"), tokens[1:]
+    return None, tokens
+
+
 def try_parse_expression(tokens):
-    """ Parses an expression. """
+    """ Parses an expression from the next of the tokens. """
     # TODO(ed): This is what's next...
-    literal, tokens = try_parse_string_literal(tokens)
-    if literal:
-        return (TokenType.CONSTANT, literal), tokens
-    num, tokens = try_parse_numeric_constant(tokens)
-    if num is not None:
-        return (TokenType.CONSTANT, num), tokens
-    var, tokens = try_parse_variable_name(tokens)
-    if var is not None:
-        return var, tokens
-    return (TokenType.CONSTANT, -1), []
-    # return (TokenType.EXPRESSION, -1), []
+    expression = []
+    while tokens:
+        op, tokens = try_parse_operator(tokens)
+        if op is not None:
+            expression.append(op)
+            continue
+        literal, tokens = try_parse_string_literal(tokens)
+        if literal:
+            expression.append(literal)
+            continue
+        num, tokens = try_parse_numeric_constant(tokens)
+        if num is not None:
+            expression.append(num)
+            continue
+        var, tokens = try_parse_variable_name(tokens)
+        if var is not None:
+            expression.append(var)
+            continue
+    return (TokenType.EXPRESSION, expression), tokens
 
 
 def try_parse_output(tokens):
@@ -245,7 +268,9 @@ def parse_line(source):
     
     if tokens[0] == "Put":
         tokens = tokens[1:]
-        exprs, tokens = try_parse_expression(tokens)
+        expr_tokens = tokens[:tokens.index("into")]
+        tokens = tokens[tokens.index("into"):]
+        exprs, _ = try_parse_expression(expr_tokens)
         if exprs is None:
             raise RockstarSyntaxError("Expected expression in assignment.")
         if tokens[0] != "into":
@@ -261,7 +286,6 @@ def parse_line(source):
     if tokens[0] == "Let":
         tokens = tokens[1:]
         varname, tokens = try_parse_variable_name(tokens)
-        print(varname)
         if varname is None:
             raise RockstarSyntaxError("Expected variable in assignment.")
         if tokens[0] not in ["be", "is", "are", "were", "was"]:
@@ -282,6 +306,21 @@ def parse_line(source):
             raise RockstarSyntaxError("Expected expression in assignment.")
         return TokenType.IF, expr
 
+    if tokens[0] == "Turn":
+        tokens = tokens[1:]
+        if tokens[0] in ["down", "up"]:
+            way = tokens[0]
+            var, tokens = try_parse_variable_name(tokens[1:])
+        else:
+            var, tokens = try_parse_variable_name(tokens)
+            way = tokens[0]
+            tokens = tokens[1:]
+        if way not in ["down", "up"]:
+            raise RockstarSyntaxError("Expected \"up\" or \"down\" for turn statement.")
+        if tokens:
+            raise RockstarSyntaxError("Unexpected tokens at end of line")
+        return TokenType.TURN, way, var
+
     # TODO(ed): Assumes that if nothing is said, it's poetic.
     varname, tokens = try_parse_variable_name(tokens)
     if varname is not None:
@@ -295,7 +334,7 @@ def parse_line(source):
         exprs = parse_poetic_number_literals(tokens)
         if exprs is None:
             raise RockstarSyntaxError("Expected expression in assignment.")
-        return TokenType.ASSIGNMENT, varname, exprs
+        return TokenType.ASSIGNMENT, varname, (TokenType.EXPRESSION, [exprs])
     raise RockstarSyntaxError("Cannot parse line")
 
 
@@ -347,19 +386,29 @@ def parse_source(source, source_file_name):
     return ast, success
 
 
+# EVAL BELLOW HERE.
+
+
 def eval_statement(statement, variables):
     """ Evaluates a statement. """
     if type_is(statement, TokenType.ASSIGNMENT):
         eval_assignment(statement[1], statement[2], variables)
     elif type_is(statement, TokenType.OUTPUT):
         print(eval_expression(statement[1], variables))
+    elif type_is(statement, TokenType.INPUT):
+        variables[statement[1][1]] = input()
     elif type_is(statement, TokenType.IF):
-        # Assumes true... pretty bad if-statements.
         res = eval_expression(statement[1], variables)
-        print("EVAL: ", statement[1], res)
         if res:
-            print("true!")
             eval_statements(statement[2], variables)
+    elif type_is(statement, TokenType.TURN):
+        _, kind, var = statement
+        val = eval_evalable(var, variables)
+        if kind == "up":
+            val = round(val + 0.5)
+        else:
+            val = round(val - 0.5)
+        variables[var[1]] = val
     else:
         print(statement)
         raise ValueError("Invalid statement")
@@ -369,15 +418,34 @@ def type_is(exprs, typ):
     return exprs[0] == typ
 
 
+def eval_evalable(evalable, variables):
+    t, evl = evalable
+    if t == TokenType.CONSTANT:
+        return evl
+    if t == TokenType.VARIABLE:
+        if evl not in variables:
+            raise ValueError("Variable used before asignment {}".format(evl))
+        return variables[evl]
+    raise ValueError("Cannot eval of type {}".format(t))
+
+
 def eval_expression(expression, variables):
     """ Evaluates an expression. """
-    t, expr = expression
-    if t == TokenType.CONSTANT:
-        return expr
-    if t == TokenType.VARIABLE:
-        return variables[expr]
-    # assert expression[0] == TokenType.EXPRESSION, "Invalid expression"
-    assert False, "Invalid expression!"
+    assert type_is(expression, TokenType.EXPRESSION), "Cannot eval non-expression"
+    _, expr = expression
+    left = eval_evalable(expr[0], variables)
+    for op, e in zip(expr[1::2], expr[2::2]):
+        right = eval_evalable(e, variables)
+        assert type_is(op, TokenType.OPERATOR)
+        if op[1] == "add":
+            left += right
+        if op[1] == "sub":
+            left -= right
+        if op[1] == "mul":
+            left *= right
+        if op[1] == "div":
+            left /= right
+    return left
 
 
 def eval_assignment(variable, expression, variables):
