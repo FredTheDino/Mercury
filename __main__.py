@@ -36,6 +36,7 @@ class TokenType(Enum):
     INPUT = 6
     END = 7
     IF = 10
+    LOOP = 13
     OPERATOR = 11
     TURN = 12
     STRING = 9
@@ -127,11 +128,11 @@ def try_parse_numeric_constant(tokens):
     """ Tries to parse out a numeric constant from the tokens. """
     #TODO(ed): Should null be 0?
     if tokens[0] in ["null", "nothing", "nowhere", "nobody", "empty", "gone"]:
-        return 0, tokens[1:]
+        return (TokenType.CONSTANT, 0), tokens[1:]
     if tokens[0] in ["true", "right", "yes", "ok", "truth"]:
-        return True, tokens[1:]
+        return (TokenType.CONSTANT, True), tokens[1:]
     if tokens[0] in ["false", "wrong", "no", "lies"]:
-        return False, tokens[1:]
+        return (TokenType.CONSTANT, False), tokens[1:]
     try:
         n = int(tokens[0])
         return (TokenType.CONSTANT, n), tokens[1:]
@@ -151,7 +152,6 @@ def try_parse_operator(tokens):
         return (TokenType.OPERATOR, "div"), tokens[1:]
     if token == "is":
         # It's a comparison!
-        import pdb; pdb.set_trace()
         if len(tokens) > 2:
             if tokens[1] == "not":
                 return (TokenType.OPERATOR, "neq"), tokens[2:]
@@ -258,7 +258,6 @@ def tokenize(source):
 
 # TODO:
 # loops, while / until
-# how to do poetic number literals
 # functions
 # arrays
 # strings
@@ -338,6 +337,20 @@ def parse_line(source):
             raise RockstarSyntaxError("Expected expression in assignment.")
         return TokenType.IF, expr
 
+    if tokens[0] == "Until":
+        tokens = tokens[1:]
+        expr, tokens = try_parse_expression(tokens)
+        if expr is None:
+            raise RockstarSyntaxError("Expected expression in assignment.")
+        return TokenType.LOOP, False, expr
+
+    if tokens[0] == "While":
+        tokens = tokens[1:]
+        expr, tokens = try_parse_expression(tokens)
+        if expr is None:
+            raise RockstarSyntaxError("Expected expression in assignment.")
+        return TokenType.LOOP, True, expr
+
     if tokens[0] == "Turn":
         tokens = tokens[1:]
         if tokens[0] in ["down", "up"]:
@@ -384,6 +397,12 @@ def treeify(statements):
             t, expr = first
             block, statements = treeify(statements)
             first = t, expr, block
+
+        if type_is(first, TokenType.LOOP):
+            t, res, expr = first
+            block, statements = treeify(statements)
+            first = t, res, expr, block
+
         ast.append(first)
     return ast, statements
 
@@ -431,6 +450,12 @@ def eval_statement(statement, variables):
         res = eval_expression(statement[1], variables)
         if res:
             eval_statements(statement[2], variables)
+    elif type_is(statement, TokenType.LOOP):
+        _, comp, expr, rest = statement
+        print("expr:", expr)
+        while eval_expression(expr, variables) == comp:
+            eval_statements(rest, variables)
+
     elif type_is(statement, TokenType.TURN):
         _, kind, var = statement
         val = eval_evalable(var, variables)
