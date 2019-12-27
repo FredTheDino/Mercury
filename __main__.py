@@ -146,9 +146,33 @@ def try_parse_operator(tokens):
     if token in ["minus", "without"]:
         return (TokenType.OPERATOR, "sub"), tokens[1:]
     if token in ["times", "of"]:
-        return (tokentype.OPERATOR, "mul"), tokens[1:]
+        return (TokenType.OPERATOR, "mul"), tokens[1:]
     if token in ["over"]:
-        return (tokentype.OPERATOR, "div"), tokens[1:]
+        return (TokenType.OPERATOR, "div"), tokens[1:]
+    if token == "is":
+        # It's a comparison!
+        import pdb; pdb.set_trace()
+        if len(tokens) > 2:
+            if tokens[1] == "not":
+                return (TokenType.OPERATOR, "neq"), tokens[2:]
+        if len(tokens) > 3:
+            if tokens[2] in ["then", "than"]:
+                if tokens[1] in ["higher", "greater", "bigger", "stronger"]:
+                    return (TokenType.OPERATOR, "gt"), tokens[3:]
+                if tokens[1] in ["lower", "less", "smaller", "weaker"]:
+                    return (TokenType.OPERATOR, "lt"), tokens[3:]
+
+        if len(tokens) > 4:
+            if tokens[1] == "as" and tokens[3] == "as":
+                if tokens[2] in ["high", "great", "big", "strong"]:
+                    return (TokenType.OPERATOR, "geq"), tokens[4:]
+                if tokens[2] in ["low", "little", "small", "weak"]:
+                    return (TokenType.OPERATOR, "leq"), tokens[4:]
+        return (TokenType.OPERATOR, "eq"), tokens[1:]
+    if token == "isnt":
+        return (TokenType.OPERATOR, "neq"), tokens[1:]
+    if token == "aint":
+        return (TokenType.OPERATOR, "neq"), tokens[1:]
     return None, tokens
 
 
@@ -453,6 +477,18 @@ def eval_expression(expression, variables):
             left *= right
         if op[1] == "div":
             left /= right
+        if op[1] == "eq":
+            left = left == right
+        if op[1] == "neq":
+            left = left != right
+        if op[1] == "lt":
+            left = left < right
+        if op[1] == "leq":
+            left = left <= right
+        if op[1] == "gt":
+            left = left > right
+        if op[1] == "geq":
+            left = left >= right
     return left
 
 
