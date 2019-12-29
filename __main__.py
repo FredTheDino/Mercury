@@ -2,6 +2,7 @@
 import sys
 from enum import Enum
 
+
 class RockstarSyntaxError(Exception):
     """ An error indicating invalid Rockstar syntax. """
 
@@ -22,10 +23,11 @@ class RockstarSyntaxError(Exception):
 
     def __repr__(self):
         return "{}\n{}\n{}({}): SyntaxError {}".format(self.source,
-                                           "^" * len(self.source),
-                                           self.filename,
-                                           self.line,
-                                           self.message)
+                                                       "^" * len(self.source),
+                                                       self.filename,
+                                                       self.line,
+                                                       self.message)
+
 
 class TokenType(Enum):
     VARIABLE = 1
@@ -40,10 +42,15 @@ class TokenType(Enum):
     OPERATOR = 11
     TURN = 12
     STRING = 9
+    FUNCTION = 14
+    CALL = 16
+    RETURN = 15
+
 
 def is_simple_variable(token):
     """ Checks if a token is a simple variable name """
-    if not token: return False
+    if not token:
+        return False
     return token.islower()
 
 
@@ -51,11 +58,13 @@ def is_proper_variable(token):
     """ Checks if a token is a part of a proper variable name """
     return token.istitle()
 
+
 def is_pronoun(token):
     """ Checks if a token is a valid pronoun """
     return token.lower() in ["it", "he", "she", "him", "her", "they",
                              "them", "ze", "hir", "zie", "zir", "xe",
                              "xem", "ve", "ver"]
+
 
 last_parsed_variable = None
 def try_parse_variable_name(tokens):
@@ -64,7 +73,7 @@ def try_parse_variable_name(tokens):
         the variable name is returned. """
     global last_parsed_variable
     variable_name = None
-    if tokens: 
+    if tokens:
         valid_prefixes = ["a", "an", "the", "my", "your"]
         if is_pronoun(tokens[0]):
             variable_name = last_parsed_variable
@@ -76,23 +85,27 @@ def try_parse_variable_name(tokens):
         elif is_proper_variable(tokens[0]):
             proper = []
             while tokens:
-                if is_proper_variable(tokens[0]): proper.append(tokens[0])
-                else: break
+                if is_proper_variable(tokens[0]):
+                    proper.append(tokens[0])
+                else:
+                    break
                 tokens = tokens[1:]
             variable_name = "_".join(proper)
         elif is_simple_variable(tokens[0]):
             variable_name = tokens[0]
             tokens = tokens[1:]
-    
+
     if variable_name is None:
         return None, tokens
     else:
         last_parsed_variable = variable_name.lower()
         return (TokenType.VARIABLE, variable_name.lower()), tokens
 
+
 def is_assignment(token):
     """ Returns true if the passed in token is an assignemnt alias. """
     return token.lower() in ["is", "are", "was", "were"]
+
 
 def parse_poetic_number_literals(tokens):
     """ Parses a series of tokens as a poetic number literal """
@@ -101,7 +114,7 @@ def parse_poetic_number_literals(tokens):
         t = tokens[0]
         tokens = tokens[1:]
         num *= 10
-        num += sum(map(lambda c: c.isalpha() or c == "-", t))  % 10
+        num += sum(map(lambda c: c.isalpha() or c == "-", t)) % 10
         if "." in t:
             break
 
@@ -126,7 +139,7 @@ def try_parse_string_literal(tokens):
 
 def try_parse_numeric_constant(tokens):
     """ Tries to parse out a numeric constant from the tokens. """
-    #TODO(ed): Should null be 0?
+    #TODO(ed) : Should null be 0 ?
     if tokens[0] in ["null", "nothing", "nowhere", "nobody", "empty", "gone"]:
         return (TokenType.CONSTANT, 0), tokens[1:]
     if tokens[0] in ["true", "right", "yes", "ok", "truth"]:
@@ -181,6 +194,26 @@ def try_parse_expression(tokens):
     # TODO(ed): This is what's next...
     expression = []
     while tokens:
+        if len(tokens) > 1 and tokens[1] == "taking":
+            name = tokens[0]
+            tokens = tokens[2:]
+            arguments = []
+            while tokens:
+                chunk = []
+                while tokens:
+                    if tokens and tokens[0] in [",", "and", "n"]:
+                        tokens = tokens[1:]
+                        if tokens and tokens[0] == "and":
+                            tokens = tokens[1:]
+                        break
+                    chunk.append(tokens[0])
+                    tokens = tokens[1:]
+                var, _ = try_parse_expression(chunk)
+                if var[1]:
+                    arguments.append(var)
+            call = TokenType.CALL, name, arguments
+            expression.append(call)
+            continue
         op, tokens = try_parse_operator(tokens)
         if op is not None:
             expression.append(op)
@@ -235,6 +268,10 @@ def tokenize(source):
             if c.isspace():
                 tokens.append(source[last_token_start:i].strip())
                 last_token_start = i + 1
+            if c == ",":
+                tokens.append(source[last_token_start:i].strip())
+                tokens.append(",")
+                last_token_start = i + 1
             if c == "(":
                 state = State.IN_COMMENT
                 tokens.append(source[last_token_start:i].strip())
@@ -257,7 +294,6 @@ def tokenize(source):
 
 
 # TODO:
-# loops, while / until
 # functions
 # arrays
 # strings
@@ -284,7 +320,8 @@ def parse_line(source):
 
     # TODO(ed): This can be made a lot better...
     tokens = tokenize(mod)
-    if not tokens: return (TokenType.END, )
+    if not tokens:
+        return (TokenType.END, )
     output, tokens = try_parse_output(tokens)
     if output is not None:
         if tokens:
@@ -296,7 +333,7 @@ def parse_line(source):
         if tokens:
             raise RockstarSyntaxError("Unexpected tokens at end of line")
         return inpu
-    
+
     if tokens[0] == "Put":
         tokens = tokens[1:]
         expr_tokens = tokens[:tokens.index("into")]
@@ -366,6 +403,33 @@ def parse_line(source):
             raise RockstarSyntaxError("Unexpected tokens at end of line")
         return TokenType.TURN, way, var
 
+    if tokens[1] == "takes":
+        # It's a function definition
+        name = tokens[0]
+        tokens = tokens[2:]
+        arguments = []
+        while tokens:
+            var, tokens = try_parse_variable_name(tokens)
+            if var is None:
+                raise RockstarSyntaxError("Failed to read argument list.")
+            arguments.append(var)
+            if tokens and tokens[0] in [",", "and", "n"]:
+                tokens = tokens[1:]
+                if tokens and tokens[0] == "and":
+                    tokens = tokens[1:]
+            elif tokens:
+                raise RockstarSyntaxError("Invalid syntax for function {}".format(name))
+        return TokenType.FUNCTION, name, arguments
+
+    if tokens[0] == "Give":
+        # Maybe allow more syntax here?
+        if tokens[1] != "back":
+            raise RockstarSyntaxError("Invalid \"Give back\" statement")
+        expr, tokens = try_parse_expression(tokens[2:])
+        if expr is None:
+            raise RockstarSyntaxError("Expected expression in \"Give back\" statement")
+        return TokenType.RETURN, expr
+
     # TODO(ed): Assumes that if nothing is said, it's poetic.
     varname, tokens = try_parse_variable_name(tokens)
     if varname is not None:
@@ -386,12 +450,17 @@ def parse_line(source):
     raise RockstarSyntaxError("Cannot parse line")
 
 
-def treeify(statements):
+def treeify(statements, in_func=False):
     ast = []
     while statements:
         first = statements[0]
         statements = statements[1:]
         if type_is(first, TokenType.END):
+            break
+        if type_is(first, TokenType.RETURN):
+            if not in_func:
+                raise RockstarSyntaxError("\"Give back\" statement has to be in function")
+            ast.append(first)
             break
         if type_is(first, TokenType.IF):
             t, expr = first
@@ -402,6 +471,11 @@ def treeify(statements):
             t, res, expr = first
             block, statements = treeify(statements)
             first = t, res, expr, block
+
+        if type_is(first, TokenType.FUNCTION):
+            t, name, args = first
+            block, statements = treeify(statements, True)
+            first = t, name, args, block
 
         ast.append(first)
     return ast, statements
@@ -438,22 +512,21 @@ def parse_source(source, source_file_name):
 # EVAL BELLOW HERE.
 
 
-def eval_statement(statement, variables):
+def eval_statement(statement, variables, function_table):
     """ Evaluates a statement. """
     if type_is(statement, TokenType.ASSIGNMENT):
-        eval_assignment(statement[1], statement[2], variables)
+        eval_assignment(statement[1], statement[2], variables, function_table)
     elif type_is(statement, TokenType.OUTPUT):
-        print(eval_expression(statement[1], variables))
+        print(eval_expression(statement[1], variables, function_table))
     elif type_is(statement, TokenType.INPUT):
         variables[statement[1][1]] = input()
     elif type_is(statement, TokenType.IF):
-        res = eval_expression(statement[1], variables)
+        res = eval_expression(statement[1], variables, function_table)
         if res:
             eval_statements(statement[2], variables)
     elif type_is(statement, TokenType.LOOP):
         _, comp, expr, rest = statement
-        print("expr:", expr)
-        while eval_expression(expr, variables) == comp:
+        while eval_expression(expr, variables, function_table) == comp:
             eval_statements(rest, variables)
 
     elif type_is(statement, TokenType.TURN):
@@ -484,16 +557,38 @@ def eval_evalable(evalable, variables):
     raise ValueError("Cannot eval of type {}".format(t))
 
 
-def eval_expression(expression, variables):
+def eval_function_call(call, variables, function_table):
+    """ Run a function and return the result. """
+    if call[1] not in function_table:
+        raise ValueError("Cannot find function of name {}".format(call[1]))
+    func = function_table[call[1]]
+    local_vars = {k[1]: eval_expression(v, variables, function_table)
+                   for (k, v) in zip(func[2], call[2])}
+    return eval_statements(func[3], local_vars, function_table.copy())
+
+
+def eval_expression(expression, variables, function_table):
     """ Evaluates an expression. """
     # TODO(ed): This is far from enough complexity to evaluate.
     # There needs to be some way to do the order of operations easily for this.
-    assert type_is(expression, TokenType.EXPRESSION), "Cannot eval non-expression"
+    assert type_is(expression, TokenType.EXPRESSION), "Cannot eval non-expression ({})".format(expression)
     _, expr = expression
-    left = eval_evalable(expr[0], variables)
-    for op, e in zip(expr[1::2], expr[2::2]):
-        right = eval_evalable(e, variables)
-        assert type_is(op, TokenType.OPERATOR)
+    if type_is(expr[0], TokenType.CALL):
+        left = eval_function_call(expr[0], variables, function_table)
+    else:
+        left = eval_evalable(expr[0], variables)
+    expr = expr[1:]
+    while expr:
+        op = expr[0]
+        expr = expr[1:]
+
+        if type_is(expr[0], TokenType.CALL):
+            right = eval_function_call(expr[0], variables, function_table)
+        else:
+            right = eval_evalable(expr[0], variables)
+
+        expr = expr[1:]
+        assert type_is(op, TokenType.OPERATOR), "Invalid syntax tree"
         if op[1] == "add":
             left += right
         if op[1] == "sub":
@@ -517,14 +612,21 @@ def eval_expression(expression, variables):
     return left
 
 
-def eval_assignment(variable, expression, variables):
+def eval_assignment(variable, expression, variables, function_table):
     # ...
-    variables[variable[1]] = eval_expression(expression, variables)
+    variables[variable[1]] = eval_expression(expression, variables, function_table)
 
 
-def eval_statements(statements, variables):
+def eval_statements(statements, variables={}, function_table={}):
     for statement in statements:
-        eval_statement(statement, variables)
+        # TODO(ed): This is kinda messy... I was thinking of
+        # splitting this into a different step but I don't know.
+        if type_is(statement, TokenType.FUNCTION):
+            function_table[statement[1]] = statement
+        elif type_is(statement, TokenType.RETURN):
+            return eval_expression(statement[1], variables, function_table)
+        else:
+            eval_statement(statement, variables, function_table)
 
 
 def run_program(ast):
